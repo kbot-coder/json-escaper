@@ -59,7 +59,7 @@ export default function Home() {
         }}
       />
 
-      <div style={{ display: 'flex', gap: '1rem', marginBottom: '18px' }}>
+      <div style={{ display: 'flex', gap: '1rem', marginBottom: '50px' }}>
         <button
           onClick={handleEscape}
           style={{
@@ -85,8 +85,8 @@ export default function Home() {
         </button>
       </div>
 
-      <h2 style={{ marginTop: '2rem' }}>Output:</h2>
-      <pre
+      {output ? (
+        <pre
         contentEditable
         onInput={handleContentEdit}
         suppressContentEditableWarning={true}
@@ -100,6 +100,8 @@ export default function Home() {
       >
         {editableOutput || output}
       </pre>
+      ) : ""}
+      
     </main>
   );
 }
