@@ -1,26 +1,107 @@
-@import "tailwindcss";
-
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #0d1117;
+  --foreground: #5bff9fc9;
+  --primary: #2a49f8;
+  --secondary: #238636;
+  --border: #30363d;
+  --code-bg: #161b22;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
 }
 
 body {
-  background: var(--background);
+  background-color: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+}
+
+main {
+  min-height: 100vh;
+}
+
+h1, h2, h3 {
+  color: whitesmoke;
+  margin-bottom: 18px;
+}
+
+textarea {
+  background-color: var(--code-bg) !important;
+  color: whitesmoke !important;  /* Changed from var(--foreground) to whitesmoke */
+  border-color: var(--border) !important;
+  resize: vertical;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  width: 70% !important;
+  min-height: 100px;
+  max-width: 1200px;
+}
+
+textarea:focus {
+  outline: none;
+  border-color: var(--primary) !important;
+  box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.1) !important;
+}
+
+textarea:focus {
+  border-color: var(--primary) !important;
+}
+
+/* Webkit browsers (Chrome, Safari, newer Edge) */
+textarea::-webkit-scrollbar {
+  width: 12px;
+}
+
+textarea::-webkit-scrollbar-track {
+  background: var(--code-bg);
+  border-radius: 6px;
+}
+
+textarea::-webkit-scrollbar-thumb {
+  background-color: var(--border);
+  border-radius: 6px;
+  border: 3px solid var(--code-bg);
+}
+
+textarea::-webkit-scrollbar-thumb:hover {
+  background-color: #444c56;
+}
+
+button {
+  transition: opacity 0.2s ease-in-out !important;
+  color: white
+}
+
+button:hover {
+  opacity: 0.8;
+}
+
+button:first-child {
+  background-color: var(--primary) !important;
+}
+
+button:last-child {
+  background-color: var(--secondary) !important;
+}
+
+pre {
+  background-color: var(--code-bg) !important;
+  border: 1px solid var(--border) !important;
+  color: var(--foreground) !important;
+  width: 70% !important;
+  max-width: 1200px;
+  border-radius: 6px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+pre[contenteditable] {
+  cursor: text;
+  outline: none;
+  transition: border-color 0.2s ease;
+}
+
+pre[contenteditable]:focus {
+  border-color: var(--primary) !important;
+  
 }
