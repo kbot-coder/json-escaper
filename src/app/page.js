@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useRef, useEffect } from 'react';
 
 export default function Home() {
   const [input, setInput] = useState('');
@@ -11,9 +11,12 @@ export default function Home() {
     try {
       const parsed = JSON.parse(input);
       const escaped = JSON.stringify(JSON.stringify(parsed));
-      setOutput(escaped.slice(1, -1)); // remove outer quotes
+      const value = escaped.slice(1, -1); // remove outer quotes
+      setOutput(value);
+      setEditableOutput(value);
     } catch {
       setOutput('❌ Invalid JSON input!');
+      setEditableOutput('❌ Invalid JSON input!');
     }
   };
 
@@ -24,14 +27,45 @@ export default function Home() {
       const parsed = JSON.parse(unescaped);
       const pretty = JSON.stringify(parsed, null, 2);
       setOutput(pretty);
+      setEditableOutput(pretty);
     } catch {
       setOutput('❌ Invalid escaped JSON input!');
+      setEditableOutput('❌ Invalid escaped JSON input!');
     }
   };
 
-  const handleContentEdit = useCallback((e) => {
-    setEditableOutput(e.currentTarget.textContent);
-  }, []);
+  // small ref-driven contentEditable wrapper to avoid React replacing children while typing
+  function EditablePre({ value, onChange, onCommit, ...props }) {
+    const ref = useRef(null);
+    const isEditing = useRef(false);
+
+    // sync incoming value to DOM only when user is not editing
+    useEffect(() => {
+      const el = ref.current;
+      if (!el) return;
+      if (!isEditing.current && el.textContent !== (value ?? '')) {
+        el.textContent = value ?? '';
+      }
+    }, [value]);
+
+    return (
+      <pre
+        {...props}
+        ref={ref}
+        contentEditable
+        suppressContentEditableWarning
+        role="textbox"
+        aria-multiline="true"
+        onInput={(e) => onChange?.(e.currentTarget.textContent)}
+        onFocus={() => (isEditing.current = true)}
+        onBlur={(e) => {
+          isEditing.current = false;
+          onCommit?.(e.currentTarget.textContent);
+        }}
+      />
+    );
+  }
+
 
   return (
     <main
@@ -49,13 +83,15 @@ export default function Home() {
         value={input}
         onChange={(e) => setInput(e.target.value)}
         rows={6}
-        placeholder='Enter JSON or escaped string here...'
+        placeholder="Enter JSON or escaped string here..."
         style={{
           margin: '1rem 0',
           fontFamily: 'monospace',
           padding: '0.5rem',
           borderRadius: '6px',
           border: '1px solid #ccc',
+          width: '70%',
+          maxWidth: '1200px',
         }}
       />
 
@@ -86,22 +122,28 @@ export default function Home() {
       </div>
 
       {output ? (
-        <pre
-        contentEditable
-        onInput={handleContentEdit}
-        suppressContentEditableWarning={true}
-        style={{
-          background: '#212121',
-          padding: '1rem',
-          whiteSpace: 'pre-wrap',
-          wordWrap: 'break-word',
-          textAlign: 'left',
-        }}
-      >
-        {editableOutput || output}
-      </pre>
-      ) : ""}
-      
+        <EditablePre
+          value={editableOutput || output}
+          onChange={setEditableOutput}
+          onCommit={(text) => {
+            setOutput(text);
+            setEditableOutput(text);
+          }}
+          style={{
+            background: '#212121',
+            padding: '1rem',
+            whiteSpace: 'pre-wrap',
+            wordWrap: 'break-word',
+            textAlign: 'left',
+            width: '70%',
+            maxWidth: '1200px',
+            borderRadius: '6px',
+            border: '1px solid #30363d',
+          }}
+        />
+      ) : (
+        ''
+      )}
     </main>
   );
 }
