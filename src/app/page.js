@@ -2,6 +2,70 @@
 
 import { useState, useRef, useEffect } from 'react';
 
+// Moved outside to prevent re-creation on every render
+function EditablePre({ value, onChange, onCommit, style, ...props }) {
+  const ref = useRef(null);
+  const isEditing = useRef(false);
+
+  // sync incoming value to DOM only when user is not editing
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (!isEditing.current && el.textContent !== (value ?? '')) {
+      el.textContent = value ?? '';
+    }
+  }, [value]);
+
+  const handlePaste = (e) => {
+    e.preventDefault();
+    const text = e.clipboardData.getData('text/plain');
+    document.execCommand('insertText', false, text);
+  };
+
+  const handleCopy = (e) => {
+    const selection = window.getSelection();
+    if (selection && selection.toString()) {
+      e.clipboardData.setData('text/plain', selection.toString());
+      e.preventDefault();
+    }
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      document.execCommand('insertText', false, '\t');
+    }
+  };
+
+  return (
+    <pre
+      {...props}
+      ref={ref}
+      contentEditable
+      suppressContentEditableWarning
+      role="textbox"
+      aria-multiline="true"
+      tabIndex={0}
+      onInput={(e) => onChange?.(e.currentTarget.textContent)}
+      onFocus={() => (isEditing.current = true)}
+      onBlur={(e) => {
+        isEditing.current = false;
+        onCommit?.(e.currentTarget.textContent);
+      }}
+      onPaste={handlePaste}
+      onCopy={handleCopy}
+      onKeyDown={handleKeyDown}
+      style={{
+        ...style,
+        cursor: 'text',
+        outline: 'none',
+        tabSize: 2,
+        MozTabSize: 2,
+      }}
+    />
+  );
+}
+
 export default function Home() {
   const [input, setInput] = useState('');
   const [output, setOutput] = useState('');
@@ -25,7 +89,7 @@ export default function Home() {
       // Try to interpret escaped string as normal JSON text
       const unescaped = JSON.parse(`"${input}"`);
       const parsed = JSON.parse(unescaped);
-      const pretty = JSON.stringify(parsed, null, 2);
+      const pretty = JSON.stringify(parsed, null, '\t');
       setOutput(pretty);
       setEditableOutput(pretty);
     } catch {
@@ -33,38 +97,6 @@ export default function Home() {
       setEditableOutput('❌ Invalid escaped JSON input!');
     }
   };
-
-  // small ref-driven contentEditable wrapper to avoid React replacing children while typing
-  function EditablePre({ value, onChange, onCommit, ...props }) {
-    const ref = useRef(null);
-    const isEditing = useRef(false);
-
-    // sync incoming value to DOM only when user is not editing
-    useEffect(() => {
-      const el = ref.current;
-      if (!el) return;
-      if (!isEditing.current && el.textContent !== (value ?? '')) {
-        el.textContent = value ?? '';
-      }
-    }, [value]);
-
-    return (
-      <pre
-        {...props}
-        ref={ref}
-        contentEditable
-        suppressContentEditableWarning
-        role="textbox"
-        aria-multiline="true"
-        onInput={(e) => onChange?.(e.currentTarget.textContent)}
-        onFocus={() => (isEditing.current = true)}
-        onBlur={(e) => {
-          isEditing.current = false;
-          onCommit?.(e.currentTarget.textContent);
-        }}
-      />
-    );
-  }
 
 
   return (
@@ -139,6 +171,8 @@ export default function Home() {
             maxWidth: '1200px',
             borderRadius: '6px',
             border: '1px solid #30363d',
+            margin: 0,
+            boxSizing: 'border-box',
           }}
         />
       ) : (
