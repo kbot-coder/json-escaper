@@ -1,20 +1,79 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import { enterEdit, tabEdit, outdentEdit } from './indent.js';
+import { getSelectionOffsets, selectRange } from './caret.js';
+import { paint } from './highlight.js';
+import { showBracketMatch } from './brackets.js';
+
+// how long typing has to pause before the syntax colours are refreshed
+const REPAINT_DELAY = 250;
+
+// light up the bracket pair around the caret, if it is sitting next to one
+function syncBrackets(el) {
+  const focused = el.ownerDocument.activeElement === el;
+  const selection = focused ? getSelectionOffsets(el) : null;
+  const caret = selection && selection.start === selection.end ? selection.start : null;
+  showBracketMatch(el, caret);
+}
+
+// re-render the syntax highlighting without moving the user's caret
+function repaint(el, text) {
+  const selection = el.ownerDocument.activeElement === el ? getSelectionOffsets(el) : null;
+  paint(el, text);
+  if (selection) selectRange(el, selection.start, selection.end);
+  syncBrackets(el);
+}
+
+// apply an edit descriptor from ./indent, keeping the browser's native undo stack intact
+function applyEdit(root, edit, selection) {
+  if (!edit) return;
+  if (edit.from !== selection.start || edit.to !== selection.end) {
+    selectRange(root, edit.from, edit.to);
+  }
+  if (edit.insert) document.execCommand('insertText', false, edit.insert);
+  else document.execCommand('delete');
+
+  const naturalCaret = edit.from + edit.insert.length;
+  const caretEnd = edit.selectionEnd ?? edit.caret;
+  if (edit.caret !== naturalCaret || caretEnd !== naturalCaret) {
+    selectRange(root, edit.caret, caretEnd);
+  }
+}
 
 // Moved outside to prevent re-creation on every render
 function EditablePre({ value, onChange, onCommit, style, ...props }) {
   const ref = useRef(null);
   const isEditing = useRef(false);
+  const isComposing = useRef(false);
 
-  // sync incoming value to DOM only when user is not editing
+  // sync incoming value to DOM only when user is not editing; while editing,
+  // wait for a pause in typing so re-highlighting never fights the keyboard
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    if (!isEditing.current && el.textContent !== (value ?? '')) {
-      el.textContent = value ?? '';
+
+    if (!isEditing.current) {
+      if (el.textContent !== (value ?? '')) repaint(el, value ?? '');
+      return;
     }
+
+    const timer = setTimeout(() => {
+      // rebuilding the DOM mid-composition would cancel the IME
+      if (!isComposing.current) repaint(el, el.textContent ?? '');
+    }, REPAINT_DELAY);
+    return () => clearTimeout(timer);
   }, [value]);
+
+  // follow the caret (arrow keys, clicks, edits) to keep the bracket pair lit
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const doc = el.ownerDocument;
+    const handler = () => syncBrackets(el);
+    doc.addEventListener('selectionchange', handler);
+    return () => doc.removeEventListener('selectionchange', handler);
+  }, []);
 
   const handlePaste = (e) => {
     e.preventDefault();
@@ -31,10 +90,20 @@ function EditablePre({ value, onChange, onCommit, style, ...props }) {
   };
 
   const handleKeyDown = (e) => {
-    if (e.key === 'Tab') {
-      e.preventDefault();
-      document.execCommand('insertText', false, '\t');
-    }
+    const el = ref.current;
+    if (!el || (e.key !== 'Tab' && e.key !== 'Enter')) return;
+    // Enter confirms an IME candidate; leave it to the input method
+    if (e.nativeEvent.isComposing) return;
+
+    e.preventDefault();
+
+    const text = el.textContent ?? '';
+    const pos = getSelectionOffsets(el);
+    if (!pos) return;
+
+    if (e.key === 'Enter') applyEdit(el, enterEdit(text, pos.start, pos.end), pos);
+    else if (e.shiftKey) applyEdit(el, outdentEdit(text, pos.start, pos.end), pos);
+    else applyEdit(el, tabEdit(text, pos.start, pos.end), pos);
   };
 
   return (
@@ -50,11 +119,20 @@ function EditablePre({ value, onChange, onCommit, style, ...props }) {
       onFocus={() => (isEditing.current = true)}
       onBlur={(e) => {
         isEditing.current = false;
-        onCommit?.(e.currentTarget.textContent);
+        const el = e.currentTarget;
+        const text = el.textContent;
+        paint(el, text);
+        showBracketMatch(el, null);
+        onCommit?.(text);
       }}
       onPaste={handlePaste}
       onCopy={handleCopy}
       onKeyDown={handleKeyDown}
+      onCompositionStart={() => (isComposing.current = true)}
+      onCompositionEnd={(e) => {
+        isComposing.current = false;
+        repaint(e.currentTarget, e.currentTarget.textContent ?? '');
+      }}
       style={{
         ...style,
         cursor: 'text',

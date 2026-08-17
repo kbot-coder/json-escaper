@@ -107,6 +107,27 @@ pre[contenteditable] {
   transition: border-color 0.2s ease;
 }
 
+/* JSON syntax highlighting; punctuation keeps the inherited --foreground */
+.tok-key { color: #79c0ff; }
+.tok-string { color: #a5d6ff; }
+.tok-number { color: #f0883e; }
+.tok-boolean { color: #d2a8ff; }
+.tok-null { color: #8b949e; }
+
+/* the bracket pair around the caret; background only, so nothing reflows */
+.tok-bracket-match {
+  background-color: rgba(88, 166, 255, 0.4);
+  border-radius: 2px;
+  color: whitesmoke;
+}
+
+/* a bracket with no partner: only ever appears once an edit breaks the JSON */
+.tok-bracket-unmatched {
+  color: #ff7b72;
+  background-color: rgba(248, 81, 73, 0.15);
+  border-radius: 2px;
+}
+
 pre[contenteditable]:focus {
   border-color: var(--primary) !important;
   
