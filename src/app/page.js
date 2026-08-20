@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { enterEdit, tabEdit, outdentEdit } from './indent.js';
 import { getSelectionOffsets, selectRange } from './caret.js';
-import { paint } from './highlight.js';
+import { paint, paintEscaped } from './highlight.js';
 import { showBracketMatch } from './brackets.js';
 
 // how long typing has to pause before the syntax colours are refreshed
@@ -18,34 +18,32 @@ function syncBrackets(el) {
 }
 
 // re-render the syntax highlighting without moving the user's caret
-function repaint(el, text) {
+function repaint(el, text, useEscaped = false) {
   const selection = el.ownerDocument.activeElement === el ? getSelectionOffsets(el) : null;
-  paint(el, text);
+  if (useEscaped) {
+    paintEscaped(el, text);
+  } else {
+    paint(el, text);
+  }
   if (selection) selectRange(el, selection.start, selection.end);
   syncBrackets(el);
 }
 
-// apply an edit descriptor from ./indent, keeping the browser's native undo stack intact
-function applyEdit(root, edit, selection) {
-  if (!edit) return;
-  if (edit.from !== selection.start || edit.to !== selection.end) {
-    selectRange(root, edit.from, edit.to);
-  }
-  if (edit.insert) document.execCommand('insertText', false, edit.insert);
-  else document.execCommand('delete');
-
-  const naturalCaret = edit.from + edit.insert.length;
+// apply an edit descriptor from ./indent
+// returns { newText, caret, caretEnd } for the caller to handle
+function computeEdit(text, edit) {
+  if (!edit) return null;
+  const newText = text.slice(0, edit.from) + (edit.insert ?? '') + text.slice(edit.to);
   const caretEnd = edit.selectionEnd ?? edit.caret;
-  if (edit.caret !== naturalCaret || caretEnd !== naturalCaret) {
-    selectRange(root, edit.caret, caretEnd);
-  }
+  return { newText, caret: edit.caret, caretEnd };
 }
 
 // Moved outside to prevent re-creation on every render
-function EditablePre({ value, onChange, onCommit, style, ...props }) {
+function EditablePre({ value, onChange, onCommit, useEscaped = false, style, ...props }) {
   const ref = useRef(null);
   const isEditing = useRef(false);
   const isComposing = useRef(false);
+  const pendingCaret = useRef(null); // { start, end } to restore after repaint
 
   // sync incoming value to DOM only when user is not editing; while editing,
   // wait for a pause in typing so re-highlighting never fights the keyboard
@@ -53,17 +51,32 @@ function EditablePre({ value, onChange, onCommit, style, ...props }) {
     const el = ref.current;
     if (!el) return;
 
+    // If we have a pending caret from a programmatic edit (Enter/Tab),
+    // update the DOM immediately and position the caret
+    if (pendingCaret.current) {
+      const { start, end } = pendingCaret.current;
+      pendingCaret.current = null;
+      if (useEscaped) {
+        paintEscaped(el, value ?? '');
+      } else {
+        paint(el, value ?? '');
+      }
+      selectRange(el, start, end);
+      syncBrackets(el);
+      return;
+    }
+
     if (!isEditing.current) {
-      if (el.textContent !== (value ?? '')) repaint(el, value ?? '');
+      if (el.textContent !== (value ?? '')) repaint(el, value ?? '', useEscaped);
       return;
     }
 
     const timer = setTimeout(() => {
       // rebuilding the DOM mid-composition would cancel the IME
-      if (!isComposing.current) repaint(el, el.textContent ?? '');
+      if (!isComposing.current) repaint(el, el.textContent ?? '', useEscaped);
     }, REPAINT_DELAY);
     return () => clearTimeout(timer);
-  }, [value]);
+  }, [value, useEscaped]);
 
   // follow the caret (arrow keys, clicks, edits) to keep the bracket pair lit
   useEffect(() => {
@@ -101,9 +114,17 @@ function EditablePre({ value, onChange, onCommit, style, ...props }) {
     const pos = getSelectionOffsets(el);
     if (!pos) return;
 
-    if (e.key === 'Enter') applyEdit(el, enterEdit(text, pos.start, pos.end), pos);
-    else if (e.shiftKey) applyEdit(el, outdentEdit(text, pos.start, pos.end), pos);
-    else applyEdit(el, tabEdit(text, pos.start, pos.end), pos);
+    let edit;
+    if (e.key === 'Enter') edit = enterEdit(text, pos.start, pos.end);
+    else if (e.shiftKey) edit = outdentEdit(text, pos.start, pos.end);
+    else edit = tabEdit(text, pos.start, pos.end);
+
+    const result = computeEdit(text, edit);
+    if (result) {
+      // Store where caret should go after the DOM updates
+      pendingCaret.current = { start: result.caret, end: result.caretEnd };
+      onChange?.(result.newText);
+    }
   };
 
   return (
@@ -121,7 +142,11 @@ function EditablePre({ value, onChange, onCommit, style, ...props }) {
         isEditing.current = false;
         const el = e.currentTarget;
         const text = el.textContent;
-        paint(el, text);
+        if (useEscaped) {
+          paintEscaped(el, text);
+        } else {
+          paint(el, text);
+        }
         showBracketMatch(el, null);
         onCommit?.(text);
       }}
@@ -131,7 +156,7 @@ function EditablePre({ value, onChange, onCommit, style, ...props }) {
       onCompositionStart={() => (isComposing.current = true)}
       onCompositionEnd={(e) => {
         isComposing.current = false;
-        repaint(e.currentTarget, e.currentTarget.textContent ?? '');
+        repaint(e.currentTarget, e.currentTarget.textContent ?? '', useEscaped);
       }}
       style={{
         ...style,
@@ -148,6 +173,7 @@ export default function Home() {
   const [input, setInput] = useState('');
   const [output, setOutput] = useState('');
   const [editableOutput, setEditableOutput] = useState('');
+  const [isEscaped, setIsEscaped] = useState(false);
 
   const handleEscape = () => {
     try {
@@ -156,9 +182,11 @@ export default function Home() {
       const value = escaped.slice(1, -1); // remove outer quotes
       setOutput(value);
       setEditableOutput(value);
+      setIsEscaped(true);
     } catch {
       setOutput('❌ Invalid JSON input!');
       setEditableOutput('❌ Invalid JSON input!');
+      setIsEscaped(false);
     }
   };
 
@@ -170,9 +198,11 @@ export default function Home() {
       const pretty = JSON.stringify(parsed, null, '\t');
       setOutput(pretty);
       setEditableOutput(pretty);
+      setIsEscaped(false);
     } catch {
       setOutput('❌ Invalid escaped JSON input!');
       setEditableOutput('❌ Invalid escaped JSON input!');
+      setIsEscaped(false);
     }
   };
 
@@ -235,6 +265,7 @@ export default function Home() {
         <EditablePre
           value={editableOutput || output}
           onChange={setEditableOutput}
+          useEscaped={isEscaped}
           onCommit={(text) => {
             setOutput(text);
             setEditableOutput(text);

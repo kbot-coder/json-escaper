@@ -15,6 +15,8 @@ const CLASS_BY_TYPE = {
   bracket: 'tok-bracket',
 };
 
+const ESCAPED_BRACKETS = ['{', '}', '[', ']'];
+
 // characters that can begin a JSON value; anything else is punctuation/whitespace
 const STARTS_VALUE = /["\-0-9tfn]/;
 
@@ -36,17 +38,23 @@ function isKey(text, afterString) {
 }
 
 /**
- * Split JSON text into tokens. Every character of the input ends up in exactly
- * one token, so joining the values reproduces the input byte for byte.
- * Returns null when the text is not valid JSON.
+ * Check if text is valid JSON.
  */
-export function tokenizeJson(text) {
+export function isValidJson(text) {
   try {
     JSON.parse(text);
+    return true;
   } catch {
-    return null;
+    return false;
   }
+}
 
+/**
+ * Split JSON-like text into tokens. Every character of the input ends up in exactly
+ * one token, so joining the values reproduces the input byte for byte.
+ * Works on both valid and invalid JSON, always applying syntax highlighting.
+ */
+export function tokenizeJson(text) {
   const tokens = [];
   let i = 0;
 
@@ -73,6 +81,9 @@ export function tokenizeJson(text) {
       tokens.push({ type: 'bracket', value: ch });
     } else {
       // punctuation, whitespace and indentation, kept as one run
+      // always advance at least one character to avoid infinite loops on
+      // partial keywords like 't' that match STARTS_VALUE but aren't complete
+      i++;
       while (i < text.length && !STARTS_VALUE.test(text[i]) && !BRACKETS.includes(text[i])) i++;
       tokens.push({ type: 'plain', value: text.slice(start, i) });
     }
@@ -102,16 +113,94 @@ export function bracketTokens(text) {
 }
 
 /**
- * Replace the element's children with highlighted markup, or with plain text
- * when the content is not valid JSON. Returns true if it highlighted.
+ * Find the end of an escaped string (starts with \", ends with \" not preceded by \\)
+ */
+function endOfEscapedString(text, start) {
+  let i = start + 2; // skip the opening \"
+  while (i < text.length) {
+    if (text[i] === '\\' && text[i + 1] === '"') {
+      return i + 2; // found closing \"
+    }
+    if (text[i] === '\\' && text[i + 1] === '\\') {
+      i += 2; // skip escaped backslash
+    } else {
+      i++;
+    }
+  }
+  return i;
+}
+
+/**
+ * Check if an escaped string is a key (next non-whitespace is :)
+ */
+function isEscapedKey(text, afterString) {
+  let i = afterString;
+  while (i < text.length && /\s/.test(text[i])) i++;
+  return text[i] === ':';
+}
+
+/**
+ * Tokenize escaped JSON (output from JSON.stringify(JSON.stringify(x)).slice(1,-1))
+ * Handles escaped quotes \" for strings while brackets remain unescaped.
+ */
+export function tokenizeEscapedJson(text) {
+  const tokens = [];
+  let i = 0;
+
+  while (i < text.length) {
+    const start = i;
+    const ch = text[i];
+
+    // Check for escaped string: \"...\"
+    if (text[i] === '\\' && text[i + 1] === '"') {
+      i = endOfEscapedString(text, i);
+      tokens.push({
+        type: isEscapedKey(text, i) ? 'key' : 'string',
+        value: text.slice(start, i)
+      });
+    } else if (ESCAPED_BRACKETS.includes(ch)) {
+      // Brackets are not escaped in JSON strings
+      i++;
+      tokens.push({ type: 'bracket', value: ch });
+    } else if (ch === '-' || (ch >= '0' && ch <= '9')) {
+      // Numbers
+      i++;
+      while (i < text.length && /[0-9eE+.\-]/.test(text[i])) i++;
+      tokens.push({ type: 'number', value: text.slice(start, i) });
+    } else if (text.startsWith('true', i) || text.startsWith('false', i)) {
+      i += ch === 't' ? 4 : 5;
+      tokens.push({ type: 'boolean', value: text.slice(start, i) });
+    } else if (text.startsWith('null', i)) {
+      i += 4;
+      tokens.push({ type: 'null', value: text.slice(start, i) });
+    } else {
+      // Punctuation (: ,) and whitespace
+      i++;
+      while (i < text.length &&
+             !(text[i] === '\\' && text[i + 1] === '"') &&
+             !ESCAPED_BRACKETS.includes(text[i]) &&
+             !/[\-0-9tfn]/.test(text[i])) {
+        i++;
+      }
+      tokens.push({ type: 'plain', value: text.slice(start, i) });
+    }
+  }
+
+  return tokens;
+}
+
+/**
+ * Replace the element's children with highlighted markup.
+ * Always applies syntax highlighting regardless of JSON validity.
+ * Returns true if the text is valid JSON.
  * Caller is responsible for saving and restoring the caret.
  */
 export function paint(el, text) {
-  const highlighted = tokenizeJson(text);
-  const tokens = highlighted ?? bracketTokens(text);
+  const valid = isValidJson(text);
+  const tokens = tokenizeJson(text);
   // valid JSON is balanced by definition, so this only ever finds something
   // once an edit has broken the structure
-  const unmatched = highlighted ? null : unmatchedBrackets(text);
+  const unmatched = valid ? null : unmatchedBrackets(text);
 
   const fragment = el.ownerDocument.createDocumentFragment();
   let offset = 0;
@@ -133,5 +222,29 @@ export function paint(el, text) {
   }
 
   el.replaceChildren(fragment);
-  return highlighted !== null;
+  return valid;
+}
+
+/**
+ * Replace the element's children with highlighted markup for escaped JSON.
+ * Uses the escaped JSON tokenizer which handles \" delimited strings.
+ */
+export function paintEscaped(el, text) {
+  const tokens = tokenizeEscapedJson(text);
+
+  const fragment = el.ownerDocument.createDocumentFragment();
+
+  for (const token of tokens) {
+    const className = CLASS_BY_TYPE[token.type];
+    if (!className) {
+      fragment.appendChild(el.ownerDocument.createTextNode(token.value));
+    } else {
+      const span = el.ownerDocument.createElement('span');
+      span.className = className;
+      span.textContent = token.value;
+      fragment.appendChild(span);
+    }
+  }
+
+  el.replaceChildren(fragment);
 }
