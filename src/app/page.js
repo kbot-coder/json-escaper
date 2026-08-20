@@ -232,6 +232,8 @@ export default function Home() {
           border: '1px solid #ccc',
           width: '70%',
           maxWidth: '1200px',
+          tabSize: 2,
+          MozTabSize: 2,
         }}
       />
 
