@@ -90,8 +90,30 @@ function EditablePre({ value, onChange, onCommit, useEscaped = false, style, ...
 
   const handlePaste = (e) => {
     e.preventDefault();
-    const text = e.clipboardData.getData('text/plain');
-    document.execCommand('insertText', false, text);
+    const el = ref.current;
+    if (!el) return;
+
+    // execCommand('insertText') drops multi-line pastes into <div>/<br> blocks,
+    // which textContent then reads back without the line breaks. Splice the
+    // text ourselves instead so the model keeps every newline.
+    const pasted = e.clipboardData.getData('text/plain').replace(/\r\n?/g, '\n');
+    const text = el.textContent ?? '';
+    const pos = getSelectionOffsets(el);
+    if (!pos) return;
+
+    const from = Math.min(pos.start, pos.end);
+    const to = Math.max(pos.start, pos.end);
+    const newText = text.slice(0, from) + pasted + text.slice(to);
+    const caret = from + pasted.length;
+
+    // an identical replacement never re-runs the effect, so place the caret now
+    if (newText === text) {
+      selectRange(el, caret, caret);
+      return;
+    }
+
+    pendingCaret.current = { start: caret, end: caret };
+    onChange?.(newText);
   };
 
   const handleCopy = (e) => {
